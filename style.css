@@ -1,0 +1,61 @@
+/* ============================================================
+   FLAPPY KIRO — Stylesheet
+   Arcade cabinet presentation layer
+   ============================================================ */
+
+/* ── Global reset ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* ── Page backdrop ── */
+body {
+  background: #0a0a0f;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  font-family: 'Courier New', Courier, monospace;
+  overflow: hidden;
+}
+
+/* ── Arcade cabinet bezel ── */
+#cabinet {
+  position: relative;
+  padding: 18px;
+  background: linear-gradient(160deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 3px #e94560,
+    0 0 30px 6px rgba(233, 69, 96, 0.35),
+    0 0 80px 20px rgba(15, 52, 96, 0.6),
+    inset 0 0 20px rgba(0, 0, 0, 0.8);
+}
+
+/* ── Pixel-style label rendered above the screen ── */
+#cabinet::before {
+  content: '★  FLAPPY KIRO  ★';
+  display: block;
+  text-align: center;
+  color: #e94560;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 4px;
+  margin-bottom: 10px;
+  text-shadow: 0 0 8px #e94560;
+}
+
+/* ── Game canvas ── */
+#gameCanvas {
+  display: block;
+  border-radius: 4px;
+  box-shadow:
+    0 0 0 2px #000,
+    0 0 0 4px #1a3a1a,
+    0 0 20px rgba(0, 255, 100, 0.15);
+  /* Prevent sub-pixel anti-aliasing on pixel-art content */
+  image-rendering: pixelated;
+  cursor: pointer;
+}
