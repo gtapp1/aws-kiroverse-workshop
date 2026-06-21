@@ -1,98 +1,137 @@
 // ============================================================
 //  audio.js — Web Audio API synthesizer (no external files)
+//  All sounds are generated with oscillators and gain envelopes.
 // ============================================================
 class AudioManager {
   constructor() {
-    this._ctx = null;
+    this._ctx         = null;
     this._initialized = false;
+    this._muted       = false;
   }
 
-  /** Lazy-init AudioContext on first user interaction (browser policy). */
+  toggle() { this._muted = !this._muted; return this._muted; }
+  isMuted() { return this._muted; }
+
+  /** Lazy-init AudioContext on first user gesture (browser policy). */
   _ensure() {
     if (this._initialized) return;
     try {
       this._ctx = new (window.AudioContext || window.webkitAudioContext)();
       this._initialized = true;
-    } catch (_) { /* Audio unavailable — silent fallback */ }
+    } catch (_) { /* no audio support */ }
   }
 
-  _osc(type, freq, duration, gain = 0.3, detune = 0) {
-    if (!this._ctx) return;
+  _osc(type, freq, duration, gain = 0.25, freqEnd = null, detune = 0) {
+    if (!this._ctx || this._muted) return;
     const o = this._ctx.createOscillator();
     const g = this._ctx.createGain();
-    o.type = type;
+    const t = this._ctx.currentTime;
+    o.type          = type;
     o.frequency.value = freq;
-    o.detune.value = detune;
-    g.gain.setValueAtTime(gain, this._ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001, this._ctx.currentTime + duration);
+    if (detune) o.detune.value = detune;
+    if (freqEnd !== null)
+      o.frequency.exponentialRampToValueAtTime(freqEnd, t + duration);
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + duration);
     o.connect(g).connect(this._ctx.destination);
-    o.start();
-    o.stop(this._ctx.currentTime + duration);
+    o.start(t);
+    o.stop(t + duration + 0.01);
   }
 
-  /** Synth "boop" — short bright tone on flap. */
+  /** Synth "boop" on flap. */
   playFlap() {
     this._ensure();
-    this._osc('sine', 520, 0.08, 0.15);
+    this._osc('sine', 500, 0.07, 0.12);
   }
 
-  /** "Zap" — short buzzy noise on laser fire. */
+  /** "Zap" on laser fire. */
   playLaser() {
     this._ensure();
-    this._osc('sawtooth', 180, 0.15, 0.2);
-    this._osc('square', 900, 0.08, 0.1);
+    this._osc('sawtooth', 160, 0.12, 0.18, 80);
+    this._osc('square',   800, 0.06, 0.08, 400);
   }
 
-  /** "Waaah" descending tone on death. */
+  /** "Waaah" descending death tone. */
   playDeath() {
     this._ensure();
-    if (!this._ctx) return;
-    const o = this._ctx.createOscillator();
-    const g = this._ctx.createGain();
-    o.type = 'sawtooth';
-    o.frequency.setValueAtTime(440, this._ctx.currentTime);
-    o.frequency.exponentialRampToValueAtTime(80, this._ctx.currentTime + 0.6);
-    g.gain.setValueAtTime(0.25, this._ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001, this._ctx.currentTime + 0.6);
-    o.connect(g).connect(this._ctx.destination);
-    o.start();
-    o.stop(this._ctx.currentTime + 0.7);
+    this._osc('sawtooth', 440, 0.65, 0.22, 75);
+    this._osc('square',   220, 0.65, 0.10, 50);
   }
 
-  /** Dramatic chord — impossible mode activates. */
+  /** Impact thud on collision (before shield absorbs). */
+  playImpact() {
+    this._ensure();
+    this._osc('triangle', 100, 0.15, 0.3, 30);
+  }
+
+  /** Dramatic minor chord — impossible mode activates. */
   playImpossible() {
     this._ensure();
-    this._osc('square', 220, 0.4, 0.15);
-    this._osc('square', 277, 0.4, 0.12);
-    this._osc('square', 330, 0.4, 0.12);
+    this._osc('square', 220, 0.45, 0.14);
+    this._osc('square', 262, 0.45, 0.11);
+    this._osc('square', 330, 0.45, 0.11);
+    this._osc('square', 440, 0.20, 0.08);  // octave accent
   }
 
-  /** Short sparkle — power-up collected. */
+  /** Sparkle arpeggio — power-up collected. */
   playPowerup() {
     this._ensure();
-    this._osc('sine', 880, 0.1, 0.15);
-    setTimeout(() => this._osc('sine', 1100, 0.1, 0.12), 60);
-    setTimeout(() => this._osc('sine', 1320, 0.15, 0.1), 120);
+    this._osc('sine', 880,  0.10, 0.14);
+    setTimeout(() => this._osc('sine', 1108, 0.10, 0.11), 60);
+    setTimeout(() => this._osc('sine', 1320, 0.14, 0.10), 120);
   }
 
-  /** Shield break — crackle. */
+  /** Crackle — shield breaks. */
   playShieldBreak() {
     this._ensure();
-    this._osc('sawtooth', 300, 0.2, 0.2);
-    this._osc('triangle', 150, 0.15, 0.15);
+    this._osc('sawtooth', 320, 0.18, 0.22, 80);
+    this._osc('triangle', 160, 0.14, 0.16, 40);
   }
 
-  /** Score point — tiny tick. */
+  /** Tiny tick — pipe scored. */
   playScore() {
     this._ensure();
-    this._osc('sine', 660, 0.05, 0.08);
+    this._osc('sine', 660, 0.04, 0.07);
   }
 
-  /** Combo milestone — ascending arpeggio. */
+  /** Ascending arpeggio — milestone reached. */
   playMilestone() {
     this._ensure();
-    this._osc('sine', 523, 0.1, 0.12);
-    setTimeout(() => this._osc('sine', 659, 0.1, 0.12), 80);
-    setTimeout(() => this._osc('sine', 784, 0.15, 0.15), 160);
+    this._osc('sine', 523, 0.09, 0.12);
+    setTimeout(() => this._osc('sine', 659, 0.09, 0.12), 80);
+    setTimeout(() => this._osc('sine', 784, 0.12, 0.14), 160);
+    setTimeout(() => this._osc('sine', 1047, 0.14, 0.18), 240);
+  }
+
+  /** Max combo fanfare. */
+  playMaxCombo() {
+    this._ensure();
+    [523, 659, 784, 1047].forEach((f, i) => {
+      setTimeout(() => this._osc('square', f, 0.15, 0.12), i * 60);
+    });
+  }
+
+  /** Warning beep when a missile is spawned. */
+  playMissileWarning() {
+    this._ensure();
+    this._osc('square', 880, 0.08, 0.10);
+    setTimeout(() => this._osc('square', 660, 0.08, 0.10), 120);
+  }
+
+  /** Explosion boom on missile impact. */
+  playExplosion() {
+    this._ensure();
+    this._osc('sawtooth', 180, 0.25, 0.25, 40);
+    this._osc('triangle', 90,  0.30, 0.30, 20);
+  }
+
+  /**
+   * Slow-mo activation warp: pitch-down sweep.
+   * Gives a satisfying "time slowing" audio cue.
+   */
+  playSlowMo() {
+    this._ensure();
+    this._osc('sine', 440, 0.5, 0.20, 120);
+    this._osc('sine', 220, 0.5, 0.15, 80);
   }
 }

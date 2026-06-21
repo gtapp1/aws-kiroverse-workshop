@@ -55,5 +55,34 @@ const SHAKE_DURATION  = 0.2;
 const COMBO_WINDOW    = 1.5;  // seconds to pass next pipe to keep combo
 const COMBO_MAX       = 5;
 
+// Difficulty scaling (progressive ramp over score)
+const DIFF_SPEED_START  = 200;   // base pipe speed (px/s)
+const DIFF_SPEED_MAX    = 380;   // cap
+const DIFF_SPEED_RATE   = 3;     // added px/s per point
+const DIFF_GAP_START    = 160;   // base gap (px)
+const DIFF_GAP_MIN      = 110;   // minimum gap
+const DIFF_GAP_SHRINK   = 0.5;   // gap shrinks by this many px per point
+
 // FSM states
 const STATE = { START: 'START_MENU', PLAYING: 'PLAYING', OVER: 'GAME_OVER' };
+
+// ── Canvas API polyfill ────────────────────────────────────
+// ctx.roundRect is not available in all browsers (Firefox < 112).
+// Patch it onto CanvasRenderingContext2D.prototype if missing.
+if (typeof CanvasRenderingContext2D !== 'undefined' &&
+    !CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+    const radius = Math.min(r || 0, Math.abs(w) / 2, Math.abs(h) / 2);
+    this.beginPath();
+    this.moveTo(x + radius, y);
+    this.lineTo(x + w - radius, y);
+    this.quadraticCurveTo(x + w, y, x + w, y + radius);
+    this.lineTo(x + w, y + h - radius);
+    this.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+    this.lineTo(x + radius, y + h);
+    this.quadraticCurveTo(x, y + h, x, y + h - radius);
+    this.lineTo(x, y + radius);
+    this.quadraticCurveTo(x, y, x + radius, y);
+    this.closePath();
+  };
+}

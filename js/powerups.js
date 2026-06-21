@@ -71,16 +71,13 @@ class PowerUpSpawner {
     this._distanceTraveled = 0;
   }
 
-  update(dt, speedMult) {
-    const travel = PIPE_SPEED * speedMult * dt;
+  update(dt, speedMult, diff) {
+    const travel = (diff ? diff.pipeSpeed : PIPE_SPEED) * speedMult * dt;
     this._distanceTraveled += travel;
-
     for (const p of this.pickups) p.update(dt, speedMult);
     this.pickups = this.pickups.filter(p => p.active);
-
     if (this._distanceTraveled >= POWERUP_SPACING) {
       this._distanceTraveled = 0;
-      // Random type
       const types = ['shield', 'slowmo', 'shrink', 'grow'];
       const type  = types[Math.floor(Math.random() * types.length)];
       const y     = PIPE_MIN_Y + Math.random() * (PIPE_MAX_Y - PIPE_MIN_Y);

@@ -2,15 +2,17 @@
 //  pipes.js — PipePair + ObstacleSpawner
 // ============================================================
 class PipePair {
-  constructor(x, gapCenterY) {
+  constructor(x, gapCenterY, gapSize) {
     this.x = x; this.gapCenterY = gapCenterY; this.scored = false;
-    this._topHoleCut = 0; this._botHoleCut = 0;
+    this._gap         = gapSize || PIPE_GAP;   // dynamic gap from difficulty
+    this._topHoleCut  = 0;
+    this._botHoleCut  = 0;
   }
-  get topPipeH() { return Math.max(0, this.gapCenterY - PIPE_GAP / 2 - this._topHoleCut); }
-  get topPipeHFull() { return this.gapCenterY - PIPE_GAP / 2; }
-  get botPipeY() { return this.gapCenterY + PIPE_GAP / 2 + this._botHoleCut; }
-  get botPipeYFull() { return this.gapCenterY + PIPE_GAP / 2; }
-  get botPipeH() { return Math.max(0, CANVAS_H - this.botPipeY); }
+  get topPipeH()     { return Math.max(0, this.gapCenterY - this._gap / 2 - this._topHoleCut); }
+  get topPipeHFull() { return this.gapCenterY - this._gap / 2; }
+  get botPipeY()     { return this.gapCenterY + this._gap / 2 + this._botHoleCut; }
+  get botPipeYFull() { return this.gapCenterY + this._gap / 2; }
+  get botPipeH()     { return Math.max(0, CANVAS_H - this.botPipeY); }
 
   getTopBounds() { return { x: this.x, y: 0, w: PIPE_WIDTH, h: this.topPipeHFull }; }
   getBotBounds() { return { x: this.x, y: this.botPipeYFull, w: PIPE_WIDTH, h: CANVAS_H - this.botPipeYFull }; }
@@ -49,11 +51,15 @@ class ObstacleSpawner {
   constructor() { this.pipes = []; }
   reset() { this.pipes = [new PipePair(CANVAS_W + 20, this._randomGapY())]; }
   _randomGapY() { return PIPE_MIN_Y + Math.random() * (PIPE_MAX_Y - PIPE_MIN_Y); }
-  update(dt, speedMult) {
-    for (const p of this.pipes) p.update(dt, speedMult);
+  update(dt, speedMult, diff) {
+    // diff is the DifficultyManager — use its live speed
+    const speed = diff ? diff.pipeSpeed * speedMult : PIPE_SPEED * speedMult;
+    for (const p of this.pipes) {
+      p.x -= speed * dt;
+    }
     const rightmost = this.pipes.reduce((b, p) => p.x > b.x ? p : b, { x: -Infinity });
     if (rightmost.x !== -Infinity && rightmost.x <= CANVAS_W - PIPE_SPACING)
-      this.pipes.push(new PipePair(CANVAS_W + 20, this._randomGapY()));
+      this.pipes.push(new PipePair(CANVAS_W + 20, this._randomGapY(), diff ? diff.gapSize : PIPE_GAP));
     this.pipes = this.pipes.filter(p => p.x + PIPE_WIDTH >= 0);
   }
   draw(ctx) { for (const p of this.pipes) p.draw(ctx); }

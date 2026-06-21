@@ -36,9 +36,14 @@ class RedGate {
 class GateSpawner {
   constructor() { this.gates = []; this._dist = 0; }
   reset() { this.gates = []; this._dist = GATE_SPACING * 0.6; }
-  update(dt, speedMult) {
-    this._dist += PIPE_SPEED * speedMult * dt;
-    for (const g of this.gates) g.update(dt, speedMult);
+  update(dt, speedMult, diff) {
+    const speed = diff ? diff.pipeSpeed * speedMult : PIPE_SPEED * speedMult;
+    this._dist += speed * dt;
+    for (const g of this.gates) {
+      g.x -= speed * dt;
+      g._pulse += dt * 4;
+      if (g.x + g.w < 0) g.active = false;
+    }
     this.gates = this.gates.filter(g => g.active);
     if (this._dist >= GATE_SPACING) { this.gates.push(new RedGate(CANVAS_W + 30)); this._dist = 0; }
   }

@@ -94,22 +94,25 @@ class HomingMissile {
 /** Spawns homing missiles after a score threshold. */
 class MissileSpawner {
   constructor() {
-    this.missiles = [];
-    this._timer   = MISSILE_INTERVAL;
+    this.missiles    = [];
+    this._timer      = MISSILE_INTERVAL;
+    this.justSpawned = false;   // true for one frame after a new missile is created
   }
 
   reset() {
-    this.missiles = [];
-    this._timer   = MISSILE_INTERVAL;
+    this.missiles    = [];
+    this._timer      = MISSILE_INTERVAL;
+    this.justSpawned = false;
   }
 
   update(dt, score, kiroX, kiroY) {
+    this.justSpawned = false;
     if (score < MISSILE_SPAWN_SCORE) return;
 
     this._timer -= dt;
     if (this._timer <= 0) {
-      this._timer = MISSILE_INTERVAL;
-      // Spawn from right side at a random y
+      this._timer      = MISSILE_INTERVAL;
+      this.justSpawned = true;
       const y = 80 + Math.random() * (CANVAS_H - 160);
       this.missiles.push(new HomingMissile(CANVAS_W + 20, y));
     }
