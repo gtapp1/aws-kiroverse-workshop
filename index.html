@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flappy Kiro</title>
+  <style>
+    /* ── Global reset & arcade cabinet backdrop ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0a0a0f;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: 'Courier New', Courier, monospace;
+      overflow: hidden;
+    }
+
+    /* Outer arcade cabinet bezel */
+    #cabinet {
+      position: relative;
+      padding: 18px;
+      background: linear-gradient(160deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      border-radius: 14px;
+      box-shadow:
+        0 0 0 3px #e94560,
+        0 0 30px 6px rgba(233, 69, 96, 0.35),
+        0 0 80px 20px rgba(15, 52, 96, 0.6),
+        inset 0 0 20px rgba(0,0,0,0.8);
+    }
+
+    /* Pixel-style label above screen */
+    #cabinet::before {
+      content: '★  FLAPPY KIRO  ★';
+      display: block;
+      text-align: center;
+      color: #e94560;
+      font-size: 11px;
+      font-weight: bold;
+      letter-spacing: 4px;
+      margin-bottom: 10px;
+      text-shadow: 0 0 8px #e94560;
+    }
+
+    /* The game canvas */
+    #gameCanvas {
+      display: block;
+      border-radius: 4px;
+      box-shadow:
+        0 0 0 2px #000,
+        0 0 0 4px #1a3a1a,
+        0 0 20px rgba(0, 255, 100, 0.15);
+      image-rendering: pixelated;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+<div id="cabinet">
+  <canvas id="gameCanvas" width="480" height="640"></canvas>
+</div>
+
+<script>
+// ============================================================
+//  FLAPPY KIRO — Single-file Vanilla JS / HTML5 Canvas Game
+//  Architecture: Modular OO components inside an IIFE
+// ============================================================
+(function () {
+  'use strict';
+
+  // ── Constants ──────────────────────────────────────────────
+  const CANVAS_W      = 480;
+  const CANVAS_H      = 640;
+  const GRAVITY       = 1200;   // px/s²
+  const FLAP_VEL      = -420;   // px/s  (negative = upward)
+  const TERMINAL_VEL  = 600;    // px/s  max downward speed
+  const PIPE_SPEED    = 200;    // px/s  leftward scroll
+  const PIPE_GAP      = 160;    // px    vertical opening
+  const PIPE_WIDTH    = 64;     // px
+  const PIPE_SPACING  = 220;    // px    horizontal distance between pipe pairs
+  const PIPE_MIN_Y    = 80;     // px    min gap-centre from ceiling
+  const PIPE_MAX_Y    = CANVAS_H - 80; // px  max gap-centre from floor
+  const TREE_SPEED    = 60;     // px/s  parallax scroll
+  const HIT_INSET     = 6;      // px    forgiving hitbox shrink
+  const LS_KEY        = 'flappyKiroHighScore';
+  const DT_CAP        = 0.1;    // s     maximum delta-time
+
+  // FSM states
+  const STATE = { START: 'START_MENU', PLAYING: 'PLAYING', OVER: 'GAME_OVER' };
+
+  // ── Canvas bootstrap ───────────────────────────────────────
+  const canvas = document.getElementById('gameCanvas');
+  const ctx    = canvas.getContext('2d');
+
+  // ============================================================
+  //  BackgroundRenderer — layered twilight sky + pine forest
+  // ============================================================
+  class BackgroundRenderer {
+    constructor () {
+      // Build an offscreen pine silhouette strip (2× canvas width for seamless loop)
+      this.stripW  = CANVAS_W * 2;
+      this.stripH  = 160;
+      this.treeOff = 0; // scroll offset
+
+      this._buildTreeStrip();
+    }
+
+    /** Procedurally draw a pine-forest silhouette onto an offscreen canvas */
+    _buildTreeStrip () {
+      this.treeCanvas = document.createElement('canvas');
+      this.treeCanvas.width  = this.stripW;
+      this.treeCanvas.height = this.stripH;
+      const tc = this.treeCanvas.getContext('2d');
+
+      // Dark forest green fill
+      tc.fillStyle = '#0d2b0d';
+      tc.fillRect(0, 0, this.stripW, this.stripH);
+
+      // Draw rows of pine trees
+      const rng = this._seededRng(42);
+      let x = 0;
+      while (x < this.stripW + 80) {
+        const h     = 60 + rng() * 80;
+        const baseW = 22 + rng() * 18;
+        this._drawPine(tc, x, this.stripH, h, baseW);
+        x += baseW * 0.9 + rng() * 20;
+      }
+    }
+
+    /** Simple seeded LCG pseudo-random for deterministic trees */
+    _seededRng (seed) {
+      let s = seed;
+      return () => { s = (s * 1664525 + 1013904223) & 0xffffffff; return (s >>> 0) / 0xffffffff; };
+    }
+
+    /** Draw a single layered pine tree */
+    _drawPine (tc, x, groundY, height, baseW) {
+      const layers = 4;
+      tc.fillStyle = '#1a4a1a';
+      for (let i = 0; i < layers; i++) {
+        const layerH = height * 0.45;
+        const ly     = groundY - height + i * (height * 0.22);
+        const lw     = baseW * (1 - i * 0.18);
+        tc.beginPath();
+        tc.moveTo(x, ly + layerH);
+        tc.lineTo(x - lw, ly + layerH);
+        tc.lineTo(x - lw * 0.5, ly);
+        tc.closePath();
+        tc.fill();
+
+        // Highlight left edge
+        tc.fillStyle = '#2a6a2a';
+        tc.beginPath();
+        tc.moveTo(x - lw * 0.5, ly);
+        tc.lineTo(x - lw * 0.75, ly + layerH * 0.5);
+        tc.lineTo(x - lw * 0.5, ly + layerH * 0.4);
+        tc.closePath();
+        tc.fill();
+        tc.fillStyle = '#1a4a1a';
+      }
+    }
+
+    update (dt, state) {
+      if (state === STATE.PLAYING) {
+        this.treeOff = (this.treeOff + TREE_SPEED * dt) % CANVAS_W;
+      }
+    }
+
+    draw () {
+      // Sky gradient — deep purple-blue → dark teal-green
+      const grad = ctx.createLinearGradient(0, 0, 0, CANVAS_H);
+      grad.addColorStop(0,    '#1a0a2e');
+      grad.addColorStop(0.35, '#0d1b4a');
+      grad.addColorStop(0.7,  '#0a2a2a');
+      grad.addColorStop(1,    '#061a06');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+      // Stars (static pixel dots seeded by position)
+      ctx.fillStyle = 'rgba(255,255,220,0.75)';
+      const stars = [[40,40],[120,25],[200,60],[310,30],[420,15],[80,90],
+                     [260,80],[380,55],[450,90],[160,110],[340,100]];
+      for (const [sx, sy] of stars) {
+        ctx.fillRect(sx, sy, 2, 2);
+      }
+
+      // Pine silhouette strip — drawn twice for seamless scroll
+      const ty = CANVAS_H - this.stripH;
+      ctx.drawImage(this.treeCanvas, -this.treeOff,           ty, CANVAS_W, this.stripH);
+      ctx.drawImage(this.treeCanvas, CANVAS_W - this.treeOff, ty, CANVAS_W, this.stripH);
+    }
+  }
+
+  // ============================================================
+  //  Kiro — player character (white pixel ghost)
+  // ============================================================
+  class Kiro {
+    constructor () {
+      this.x    = 120;
+      this.y    = CANVAS_H / 2;
+      this.w    = 40;
+      this.h    = 48;
+      this.vy   = 0;     // vertical velocity
+      this.time = 0;     // elapsed time for tail animation
+    }
+
+    reset () {
+      this.x  = 120;
+      this.y  = CANVAS_H / 2;
+      this.vy = 0;
+      this.time = 0;
+    }
+
+    flap () {
+      this.vy = FLAP_VEL;
+    }
+
+    update (dt) {
+      this.time += dt;
+      // Gravity
+      this.vy = Math.min(this.vy + GRAVITY * dt, TERMINAL_VEL);
+      this.y += this.vy * dt;
+    }
+
+    /** Inset bounding box for AABB collision */
+    getBounds () {
+      return {
+        x: this.x - this.w / 2 + HIT_INSET,
+        y: this.y - this.h / 2 + HIT_INSET,
+        w: this.w - HIT_INSET * 2,
+        h: this.h - HIT_INSET * 2
+      };
+    }
+
+    draw () {
+      ctx.save();
+      ctx.translate(this.x, this.y);
+
+      // Tilt based on velocity
+      const maxTilt = this.vy < 0 ? -0.35 : 0.52;
+      const tiltT   = Math.min(Math.abs(this.vy) / TERMINAL_VEL, 1);
+      const angle   = (this.vy < 0 ? -1 : 1) * tiltT * Math.abs(maxTilt);
+      ctx.rotate(angle);
+
+      const w = this.w;
+      const h = this.h;
+
+      // ── Ghost body (white) ──
+      ctx.fillStyle = '#f0f0ff';
+      ctx.beginPath();
+
+      // Rounded dome top
+      ctx.arc(0, -h * 0.15, w * 0.5, Math.PI, 0, false);
+
+      // Right side straight down to tail
+      ctx.lineTo(w * 0.5, h * 0.35);
+
+      // Wavy spectral tail — 3 bumps animated with sin
+      const t    = this.time * 6;
+      const bump = 8;
+      const tailY = h * 0.35;
+      ctx.quadraticCurveTo( w * 0.33, tailY + bump * Math.sin(t),
+                             w * 0.16, tailY);
+      ctx.quadraticCurveTo( w * 0.0,  tailY + bump * Math.sin(t + 1.2),
+                            -w * 0.16, tailY);
+      ctx.quadraticCurveTo(-w * 0.33, tailY + bump * Math.sin(t + 2.4),
+                            -w * 0.5,  tailY);
+
+      // Left side back up
+      ctx.lineTo(-w * 0.5, -h * 0.15);
+      ctx.closePath();
+      ctx.fill();
+
+      // Ghost body outline
+      ctx.strokeStyle = 'rgba(120,120,180,0.5)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Inner glow / sheen on ghost body
+      const sheen = ctx.createRadialGradient(-w*0.1, -h*0.2, 2, 0, 0, w*0.6);
+      sheen.addColorStop(0, 'rgba(255,255,255,0.45)');
+      sheen.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = sheen;
+      ctx.beginPath();
+      ctx.arc(0, -h * 0.15, w * 0.5, Math.PI, 0, false);
+      ctx.lineTo(w * 0.5, h * 0.35);
+      ctx.lineTo(-w * 0.5, h * 0.35);
+      ctx.closePath();
+      ctx.fill();
+
+      // ── Eyes ──
+      const eyeY  = -h * 0.12;
+      const eyeR  = 7;
+      const eyeOX = 10;
+
+      // Eye whites
+      ctx.fillStyle = '#111122';
+      ctx.beginPath(); ctx.arc(-eyeOX, eyeY, eyeR, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( eyeOX, eyeY, eyeR, 0, Math.PI*2); ctx.fill();
+
+      // Eye highlights
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(-eyeOX + 2, eyeY - 2, 2.5, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( eyeOX + 2, eyeY - 2, 2.5, 0, Math.PI*2); ctx.fill();
+
+      // Pixel dot pupils
+      ctx.fillStyle = '#7070ff';
+      ctx.fillRect(-eyeOX - 1.5, eyeY - 1.5, 3, 3);
+      ctx.fillRect( eyeOX - 1.5, eyeY - 1.5, 3, 3);
+
+      ctx.restore();
+    }
+  }
+
+  // ============================================================
+  //  PipePair — one top+bottom pipe obstacle
+  // ============================================================
+  class PipePair {
+    constructor (x, gapCenterY) {
+      this.x          = x;
+      this.gapCenterY = gapCenterY;
+      this.scored     = false; // true once player has passed
+    }
+
+    get topPipeH  () { return this.gapCenterY - PIPE_GAP / 2; }
+    get botPipeY  () { return this.gapCenterY + PIPE_GAP / 2; }
+    get botPipeH  () { return CANVAS_H - this.botPipeY; }
+
+    /** Bounding boxes for collision */
+    getTopBounds () {
+      return { x: this.x, y: 0, w: PIPE_WIDTH, h: this.topPipeH };
+    }
+    getBotBounds () {
+      return { x: this.x, y: this.botPipeY, w: PIPE_WIDTH, h: this.botPipeH };
+    }
+
+    update (dt) {
+      this.x -= PIPE_SPEED * dt;
+    }
+
+    /** Draw one pipe segment (top or bottom) */
+    _drawSegment (px, py, pw, ph, isTop) {
+      const BRIGHT  = '#4caf50';
+      const MID     = '#388e3c';
+      const DARK    = '#1b5e20';
+      const CAP_H   = 20;
+      const CAP_EXT = 8; // extra width on each side for cap flange
+
+      // ── Body ──
+      // Base fill
+      ctx.fillStyle = MID;
+      ctx.fillRect(px, py, pw, ph);
+
+      // Left highlight stripe
+      ctx.fillStyle = BRIGHT;
+      ctx.fillRect(px, py, 10, ph);
+
+      // Right shadow stripe
+      ctx.fillStyle = DARK;
+      ctx.fillRect(px + pw - 8, py, 8, ph);
+
+      // Inner mid stripe
+      ctx.fillStyle = '#43a047';
+      ctx.fillRect(px + 12, py, 4, ph);
+
+      // Black border around body
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(px + 1, py + 1, pw - 2, ph - 2);
+
+      // ── Cap (flange facing the gap) ──
+      const capX = px - CAP_EXT;
+      const capW = pw + CAP_EXT * 2;
+      let capY;
+      if (isTop) {
+        capY = py + ph - CAP_H; // cap is at bottom of top pipe
+      } else {
+        capY = py;              // cap is at top of bottom pipe
+      }
+
+      // Cap fill
+      ctx.fillStyle = BRIGHT;
+      ctx.fillRect(capX, capY, capW, CAP_H);
+
+      // Cap left highlight
+      ctx.fillStyle = '#a5d6a7';
+      ctx.fillRect(capX, capY, 6, CAP_H);
+
+      // Cap right shadow
+      ctx.fillStyle = DARK;
+      ctx.fillRect(capX + capW - 6, capY, 6, CAP_H);
+
+      // Cap top/bottom edge line
+      ctx.fillStyle = BRIGHT;
+      ctx.fillRect(capX, isTop ? capY : capY + CAP_H - 4, capW, 4);
+
+      // Cap border
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(capX + 1, capY + 1, capW - 2, CAP_H - 2);
+    }
+
+    draw () {
+      this._drawSegment(this.x, 0,           PIPE_WIDTH, this.topPipeH, true);
+      this._drawSegment(this.x, this.botPipeY, PIPE_WIDTH, this.botPipeH, false);
+    }
+  }
+
+  // ============================================================
+  //  ObstacleSpawner — manages the pipe pool
+  // ============================================================
+  class ObstacleSpawner {
+    constructor () {
+      this.pipes = [];
+      this._nextSpawnX = CANVAS_W + 60;
+    }
+
+    reset () {
+      this.pipes       = [];
+      this._nextSpawnX = CANVAS_W + 60;
+    }
+
+    _randomGapY () {
+      return PIPE_MIN_Y + Math.random() * (PIPE_MAX_Y - PIPE_MIN_Y);
+    }
+
+    update (dt) {
+      // Move all pipes
+      for (const p of this.pipes) p.update(dt);
+
+      // Spawn new pipe when the right side passes the threshold
+      const rightmost = this.pipes.length
+        ? Math.max(...this.pipes.map(p => p.x + PIPE_WIDTH))
+        : -Infinity;
+
+      if (rightmost < CANVAS_W + 20) {
+        // Either first pipe or enough space has opened up
+        if (this.pipes.length === 0 || rightmost < CANVAS_W - PIPE_SPACING + PIPE_WIDTH) {
+          this.pipes.push(new PipePair(CANVAS_W + 20, this._randomGapY()));
+        }
+      }
+
+      // Remove pipes that have scrolled off screen
+      this.pipes = this.pipes.filter(p => p.x + PIPE_WIDTH + 20 > 0);
+    }
+
+    draw () {
+      for (const p of this.pipes) p.draw();
+    }
+  }
+
+  // ============================================================
+  //  CollisionDetector — AABB helpers
+  // ============================================================
+  class CollisionDetector {
+    _overlaps (a, b) {
+      return a.x < b.x + b.w &&
+             a.x + a.w > b.x &&
+             a.y < b.y + b.h &&
+             a.y + a.h > b.y;
+    }
+
+    /** Returns true if Kiro has collided with anything lethal */
+    check (kiro, pipes) {
+      const kb = kiro.getBounds();
+
+      // Floor / ceiling
+      if (kiro.y + kiro.h / 2 >= CANVAS_H) return true;
+      if (kiro.y - kiro.h / 2 <= 0)        return true;
+
+      // Pipes
+      for (const pipe of pipes) {
+        if (this._overlaps(kb, pipe.getTopBounds())) return true;
+        if (this._overlaps(kb, pipe.getBotBounds())) return true;
+      }
+      return false;
+    }
+  }
+
+  // ============================================================
+  //  InputHandler — keyboard, mouse, touch
+  // ============================================================
+  class InputHandler {
+    constructor (onAction) {
+      this._onAction = onAction;
+
+      const fire = (e) => {
+        if (e.type === 'keydown' && e.code !== 'Space') return;
+        if (e.code === 'Space') e.preventDefault();
+        this._onAction();
+      };
+
+      document.addEventListener('keydown',   fire);
+      canvas.addEventListener  ('mousedown', fire);
+      canvas.addEventListener  ('touchstart', (e) => { e.preventDefault(); this._onAction(); },
+                                 { passive: false });
+    }
+  }
+
+  // ============================================================
+  //  CRTOverlay — scanlines + vignette
+  // ============================================================
+  class CRTOverlay {
+    constructor () {
+      // Pre-build the scanline strip as an offscreen canvas for performance
+      this._scanlines = document.createElement('canvas');
+      this._scanlines.width  = 1;
+      this._scanlines.height = CANVAS_H;
+      const sc = this._scanlines.getContext('2d');
+      for (let y = 0; y < CANVAS_H; y += 2) {
+        sc.fillStyle = 'rgba(0,0,0,0.10)';
+        sc.fillRect(0, y, 1, 1);
+      }
+    }
+
+    draw () {
+      // Tile the scanline strip across the canvas
+      const pat = ctx.createPattern(this._scanlines, 'repeat-x');
+      ctx.save();
+      ctx.fillStyle = pat;
+      ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+      ctx.restore();
+
+      // Radial vignette darkening corners
+      const vgr = ctx.createRadialGradient(
+        CANVAS_W/2, CANVAS_H/2, CANVAS_H * 0.3,
+        CANVAS_W/2, CANVAS_H/2, CANVAS_H * 0.9
+      );
+      vgr.addColorStop(0, 'rgba(0,0,0,0)');
+      vgr.addColorStop(1, 'rgba(0,0,0,0.55)');
+      ctx.fillStyle = vgr;
+      ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+    }
+  }
+
+  // ============================================================
+  //  UIRenderer — score, menus, game-over screen
+  // ============================================================
+  class UIRenderer {
+    _shadow (x, y, text, size, color) {
+      ctx.font      = `bold ${size}px "Courier New", monospace`;
+      ctx.fillStyle = 'rgba(0,0,0,0.75)';
+      ctx.fillText(text, x + 2, y + 2);
+      ctx.fillStyle = color;
+      ctx.fillText(text, x, y);
+    }
+
+    drawScore (score) {
+      ctx.textAlign = 'right';
+      this._shadow(CANVAS_W - 16, 42, `SCORE: ${score}`, 22, '#ffffff');
+      ctx.textAlign = 'left';
+    }
+
+    drawStartMenu (highScore) {
+      // Semi-transparent panel
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(60, 160, CANVAS_W - 120, 300);
+      ctx.strokeStyle = '#4caf50';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(60, 160, CANVAS_W - 120, 300);
+
+      ctx.textAlign = 'center';
+      // Title
+      this._shadow(CANVAS_W/2, 230, 'FLAPPY', 52, '#f0f0ff');
+      this._shadow(CANVAS_W/2, 288, 'KIRO',   52, '#a0a0ff');
+
+      // Divider
+      ctx.fillStyle = '#4caf50';
+      ctx.fillRect(80, 305, CANVAS_W - 160, 2);
+
+      this._shadow(CANVAS_W/2, 345, 'PRESS SPACE / TAP', 15, '#ccffcc');
+      this._shadow(CANVAS_W/2, 368, 'TO START',          15, '#ccffcc');
+
+      if (highScore > 0) {
+        this._shadow(CANVAS_W/2, 415, `BEST: ${highScore}`, 18, '#ffd700');
+      }
+      ctx.textAlign = 'left';
+    }
+
+    drawGameOver (score, highScore) {
+      ctx.fillStyle = 'rgba(0,0,0,0.65)';
+      ctx.fillRect(60, 150, CANVAS_W - 120, 340);
+      ctx.strokeStyle = '#e94560';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(60, 150, CANVAS_W - 120, 340);
+
+      ctx.textAlign = 'center';
+      this._shadow(CANVAS_W/2, 220, 'GAME', 50, '#e94560');
+      this._shadow(CANVAS_W/2, 275, 'OVER', 50, '#e94560');
+
+      ctx.fillStyle = '#444';
+      ctx.fillRect(80, 290, CANVAS_W - 160, 2);
+
+      this._shadow(CANVAS_W/2, 330, `SCORE:  ${score}`,     20, '#ffffff');
+      this._shadow(CANVAS_W/2, 360, `BEST:   ${highScore}`, 20, '#ffd700');
+
+      ctx.fillStyle = '#444';
+      ctx.fillRect(80, 380, CANVAS_W - 160, 2);
+
+      this._shadow(CANVAS_W/2, 415, 'PRESS SPACE / TAP', 15, '#ccffcc');
+      this._shadow(CANVAS_W/2, 438, 'TO RESTART',        15, '#ccffcc');
+
+      ctx.textAlign = 'left';
+    }
+  }
+
+  // ============================================================
+  //  Game — top-level FSM and main loop
+  // ============================================================
+  class Game {
+    constructor () {
+      this.state  = STATE.START;
+      this.score  = 0;
+      this.hiScore = parseInt(localStorage.getItem(LS_KEY) || '0', 10);
+
+      // Sub-systems
+      this.bg       = new BackgroundRenderer();
+      this.kiro     = new Kiro();
+      this.spawner  = new ObstacleSpawner();
+      this.collider = new CollisionDetector();
+      this.crt      = new CRTOverlay();
+      this.ui       = new UIRenderer();
+
+      // Bind input — single action dispatches to FSM
+      new InputHandler(() => this._onInput());
+
+      this._lastTime = null;
+      requestAnimationFrame((t) => this._loop(t));
+    }
+
+    // ── Input dispatch ────────────────────────────────────────
+    _onInput () {
+      if (this.state === STATE.PLAYING) {
+        this.kiro.flap();
+      } else {
+        this._startPlaying();
+      }
+    }
+
+    // ── State transitions ─────────────────────────────────────
+    _startPlaying () {
+      this.score = 0;
+      this.kiro.reset();
+      this.spawner.reset();
+      this.state = STATE.PLAYING;
+    }
+
+    _triggerGameOver () {
+      if (this.score > this.hiScore) {
+        this.hiScore = this.score;
+        localStorage.setItem(LS_KEY, this.hiScore);
+      }
+      this.state = STATE.OVER;
+    }
+
+    // ── Scoring ───────────────────────────────────────────────
+    _checkScoring () {
+      for (const pipe of this.spawner.pipes) {
+        if (!pipe.scored && this.kiro.x > pipe.x + PIPE_WIDTH) {
+          pipe.scored = true;
+          this.score++;
+        }
+      }
+    }
+
+    // ── Main game loop ────────────────────────────────────────
+    _loop (timestamp) {
+      // Delta-time calculation with cap
+      const dt = this._lastTime === null
+        ? 0
+        : Math.min((timestamp - this._lastTime) / 1000, DT_CAP);
+      this._lastTime = timestamp;
+
+      // Update
+      this.bg.update(dt, this.state);
+
+      if (this.state === STATE.PLAYING) {
+        this.kiro.update(dt);
+        this.spawner.update(dt);
+        this._checkScoring();
+
+        if (this.collider.check(this.kiro, this.spawner.pipes)) {
+          this._triggerGameOver();
+        }
+      }
+
+      // Draw
+      this.bg.draw();
+
+      if (this.state === STATE.PLAYING || this.state === STATE.OVER) {
+        this.spawner.draw();
+        this.kiro.draw();
+      }
+
+      if (this.state === STATE.START) {
+        // Show idle Kiro on start screen
+        this.kiro.draw();
+        this.ui.drawStartMenu(this.hiScore);
+      } else if (this.state === STATE.PLAYING) {
+        this.ui.drawScore(this.score);
+      } else if (this.state === STATE.OVER) {
+        this.ui.drawScore(this.score);
+        this.ui.drawGameOver(this.score, this.hiScore);
+      }
+
+      // CRT overlay — always last
+      this.crt.draw();
+
+      requestAnimationFrame((t) => this._loop(t));
+    }
+  }
+
+  // ── Boot ──────────────────────────────────────────────────
+  window.addEventListener('load', () => new Game());
+
+})();
+</script>
+</body>
+</html>
